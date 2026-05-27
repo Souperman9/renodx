@@ -66,7 +66,7 @@ jobs:
         run: cmake --preset clang-x64 -DRENODX_ENABLE_SPIRV_VALIDATION=OFF -DRENODX_ENABLE_SPIRV_DISASSEMBLY=OFF -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build (x64)
-        run: cmake --build --preset clang-x64-release --verbose --target splatoon2
+        run: cmake --build --preset clang-x64-release --verbose --target splatoon3
 
       - name: Set up Clang
         uses: egor-tensin/setup-clang@v1
