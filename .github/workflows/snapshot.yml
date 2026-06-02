@@ -20,6 +20,7 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_CACHE_SIZE: "5G"
       SCCACHE_C_CUSTOM_CACHE_BUSTER: "${{ github.workflow }}"
+      VULKAN_SDK_VERSION: "1.4.313.0"
 
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +34,76 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          $version = "${{ env.VULKAN_SDK_VERSION }}"
+          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk-installer.exe"
+          $installRoot = "C:\VulkanSDK"
+          $installDir = Join-Path $installRoot $version
+          $urls = @(
+            "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe",
+            "https://sdk.lunarg.com/sdk/download/$version/windows/VulkanSDK-$version-Installer.exe"
+          )
+
+          $downloaded = $false
+          foreach ($url in $urls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $installer
+              $downloaded = $true
+              break
+            } catch {
+              Write-Host "Failed to download Vulkan SDK from $url"
+            }
+          }
+
+          if (-not $downloaded) {
+            throw "Unable to download Vulkan SDK version $version from known installer URLs."
+          }
+
+          Start-Process -FilePath $installer -ArgumentList '--root', $installRoot, '--accept-licenses', '--default-answer', '--confirm-command', 'install' -Wait -NoNewWindow
+
+          $sdkCandidates = @(
+            $installDir,
+            $installRoot,
+            (Join-Path $installRoot "SDK"),
+            (Join-Path $env:ProgramFiles "VulkanSDK\$version"),
+            (Join-Path $env:ProgramFiles "VulkanSDK"),
+            (Join-Path ${env:ProgramFiles(x86)} "VulkanSDK\$version"),
+            (Join-Path ${env:ProgramFiles(x86)} "VulkanSDK")
+          ) | Where-Object { $_ -and (Test-Path $_) }
+
+          $sdkDir = $sdkCandidates | Where-Object {
+            (Test-Path (Join-Path $_ 'Include\vulkan\vulkan.h')) -and
+            (Test-Path (Join-Path $_ 'Bin'))
+          } | Select-Object -First 1
+
+          if (-not $sdkDir) {
+            $searchRoots = @($installRoot, (Join-Path $env:ProgramFiles 'VulkanSDK'), (Join-Path ${env:ProgramFiles(x86)} 'VulkanSDK')) |
+              Where-Object { $_ -and (Test-Path $_) }
+
+            foreach ($root in $searchRoots) {
+              $sdkDir = Get-ChildItem -Path $root -Directory -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                  (Test-Path (Join-Path $_.FullName 'Include\vulkan\vulkan.h')) -and
+                  (Test-Path (Join-Path $_.FullName 'Bin'))
+                } |
+                Select-Object -ExpandProperty FullName -First 1
+
+              if ($sdkDir) {
+                break
+              }
+            }
+          }
+
+          if (-not $sdkDir) {
+            throw "Vulkan SDK install directory not found. Checked standard install roots after running the installer."
+          }
+
+          Write-Host "Using Vulkan SDK at $sdkDir"
+          "VULKAN_SDK=$sdkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$sdkDir\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Download Slang binaries
         run: |
@@ -60,23 +131,6 @@ jobs:
       - name: Build (x64)
         run: cmake --build --preset clang-x64-release --verbose
 
-      - name: Set up Clang
-        uses: egor-tensin/setup-clang@v1
-        with:
-          version: latest
-          platform: x86
-
-      - name: Configure build for x86
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64_x86
-
-      - name: Configure CMake (x86)
-        run: cmake --preset clang-x86 -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-
-      - name: Build (x86)
-        run: cmake --build --preset clang-x86-release --verbose
-
       - name: Show sccache stats
         if: always()
         run: sccache --show-stats
@@ -89,9 +143,6 @@ jobs:
 
       - name: Copy Binaries (x64)
         run: copy build\release\*.addon64 githubrelease\
-
-      - name: Copy Binaries (x86)
-        run: copy build32\release\*.addon32 githubrelease\
 
       - name: Copy Binaries (Tools)
         run: copy build\release\*.exe githubrelease\
@@ -125,7 +176,7 @@ jobs:
           path: "githubrelease"
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: needs.build.result == 'success' && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
     needs: build
     permissions:
       pages: write # to deploy to Pages
