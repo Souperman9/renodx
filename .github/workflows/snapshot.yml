@@ -124,7 +124,7 @@ jobs:
           path: "githubrelease"
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    # if: github.ref == 'refs/heads/main'
     needs: build
     permissions:
       pages: write # to deploy to Pages
