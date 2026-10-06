@@ -41,7 +41,7 @@ PsOutput main(PsInput IN) {
 
   // bgr in
   PsOutput OUT;
-  float4 scene = fs_img4.SampleLevel(fs_sampsgpr_12, IN.fs_in_attr0.xy, 0.0);
+  float4 scene = fs_img4.SampleLevel(fs_sampsgpr_12, IN.fs_in_attr0.xy, 0.0).zyxw;
   float3 color = scene.xyz;
   if (LUT_STRENGTH != 0) {
     float scale = renodx::tonemap::c_infinity_rolloff::ComputeMaxChannelScale(scene.xyz, 1);
@@ -49,7 +49,7 @@ PsOutput main(PsInput IN) {
     color /= scale;
     if (LUT_STRENGTH != 100) color = lerp(scene.xyz, color, LUT_STRENGTH);
   }
-  color = renodx::color::srgb::DecodeSafe(color);
+  color = renodx::color::srgb::DecodeSafe(color.zyx);
   color = ApplyColorGrade(color);
   color = DisplayMap(color);
   OUT.frag_color0.xyz = renodx::draw::RenderIntermediatePass(color);
